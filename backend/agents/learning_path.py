@@ -1,131 +1,92 @@
-"""
-Learning Path Agent
-Generates a personalized, resource-specific learning roadmap.
-
-Cost: ~$0.12 per roadmap (Claude Sonnet 4.6)
-"""
-
 import json
+import os
 import anthropic
-from tenacity import retry, stop_after_attempt, wait_exponential
-import structlog
 
-log = structlog.get_logger()
-client = anthropic.Anthropic()
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-LEARNING_PATH_SCHEMA = {
-    "roadmap": [
-        {
-            "week": "integer",
-            "focus": "primary topic for this week",
-            "resources": [
-                {
-                    "name": "resource name",
-                    "url": "actual URL if known",
-                    "type": "course | book | project | certification | community",
-                    "platform": "Coursera | YouTube | DataCamp | Kaggle | LinkedIn Learning | free | etc",
-                    "cost": "free | $X",
-                    "time_hours": "estimated hours this week",
-                    "why": "one sentence on why this resource for this gap"
-                }
-            ],
-            "milestone": "measurable outcome by end of week"
-        }
-    ],
-    "total_weeks": "integer",
-    "total_cost_usd": "estimated total cost across all paid resources",
-    "estimated_outcome": "what the person will be capable of and what roles they'll qualify for",
-    "key_projects_to_build": ["3-5 portfolio projects to demonstrate new skills"],
-    "communities_to_join": ["relevant communities, Slack groups, subreddits"],
-    "metrics_to_track": ["how to measure learning progress week by week"]
-}
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def generate_learning_path(gap_analysis: dict, constraints: dict) -> dict:
-    """
-    Generate a personalized learning roadmap based on gap analysis.
-    
-    Args:
-        gap_analysis: Output from gap_analyzer
-        constraints: User learning preferences
-            {
-                "hours_per_week": int,      # How many hours available (default: 5)
-                "budget": str,              # "free" | "low" ($0-50) | "any"
-                "learning_style": str,      # "video" | "reading" | "projects" | "mixed"
-                "timeline_months": int      # Target timeline (default: 3)
-            }
-            
-    Returns:
-        Structured learning roadmap
-    """
-    
-    log.info("Generating learning path",
-             gap_score=gap_analysis.get("gap_score"),
-             hours_per_week=constraints.get("hours_per_week", 5),
-             budget=constraints.get("budget", "free"))
-    
+
+    print("Generating learning path")
+
     clean_gaps = {k: v for k, v in gap_analysis.items() if not k.startswith("_")}
-    
+
     hours_per_week = constraints.get("hours_per_week", 5)
     budget = constraints.get("budget", "free")
     learning_style = constraints.get("learning_style", "mixed")
     timeline_months = constraints.get("timeline_months", 3)
     total_weeks = timeline_months * 4
-    
-    budget_instruction = {
-        "free": "ONLY recommend free resources. Coursera audit, YouTube, free tiers, open-source.",
-        "low": "Prefer free resources. Paid options max $50 total budget.",
-        "any": "Recommend best resources regardless of cost. Note pricing."
-    }.get(budget, "Prefer free resources.")
-    
-    prompt = f"""You are a career education strategist who designs learning systems for busy professionals.
 
-Create a week-by-week learning roadmap to close these specific skill gaps.
+    budget_instruction = {
+        "free": "ONLY recommend free resources.",
+        "low": "Prefer free, max $50 total.",
+        "any": "Recommend best resources regardless of cost."
+    }.get(budget, "Prefer free resources.")
+
+    prompt = f"""You are a career education strategist. Create a week-by-week learning roadmap.
 
 GAP ANALYSIS:
 {json.dumps(clean_gaps, indent=2)}
 
-USER CONSTRAINTS:
-- Available hours per week: {hours_per_week}
+CONSTRAINTS:
+- Hours per week: {hours_per_week}
 - Budget: {budget} — {budget_instruction}
 - Learning style: {learning_style}
 - Timeline: {timeline_months} months ({total_weeks} weeks)
 
-Return ONLY valid JSON matching this schema:
-{json.dumps(LEARNING_PATH_SCHEMA, indent=2)}
+Return ONLY valid JSON, no markdown, no explanation:
+{{
+    "roadmap": [
+        {{
+            "week": 1,
+            "focus": "topic for this week",
+            "resources": [
+                {{
+                    "name": "resource name",
+                    "url": "https://actual-url.com",
+                    "type": "course",
+                    "platform": "Coursera",
+                    "cost": "free",
+                    "time_hours": 5,
+                    "why": "why this resource"
+                }}
+            ],
+            "milestone": "what they achieve by end of week"
+        }}
+    ],
+    "total_weeks": {total_weeks},
+    "total_cost_usd": 0,
+    "estimated_outcome": "what roles they qualify for after completion",
+    "key_projects_to_build": ["project1", "project2", "project3"],
+    "communities_to_join": ["community1", "community2"],
+    "metrics_to_track": ["metric1", "metric2"]
+}}
 
-Rules:
-- Total hours per week across all resources must equal {hours_per_week} hours
-- Address critical_gaps first, quick_wins in week 1
-- Include real, existing resources with real URLs where possible
-- key_projects_to_build: must be portfolio-worthy and demonstrable on GitHub
-- Sequence matters: foundational skills before advanced ones
-- Each week must have exactly ONE clear milestone
+Generate {min(total_weeks, 8)} weeks of roadmap. Return only JSON."""
 
-Return only the JSON. No markdown. No explanation."""
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        print("Learning path Claude response received")
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    
-    result = json.loads(raw.strip())
-    result["_meta"] = {
-        "tokens_in": response.usage.input_tokens,
-        "tokens_out": response.usage.output_tokens,
-        "model": "claude-sonnet-4-6"
-    }
-    
-    log.info("Learning path generated",
-             total_weeks=result.get("total_weeks"),
-             total_cost=result.get("total_cost_usd"))
-    
-    return result
+        raw = response.content[0].text.strip()
+        if "```" in raw:
+            parts = raw.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                try:
+                    return json.loads(part)
+                except:
+                    continue
+
+        result = json.loads(raw)
+        print(f"Learning path generated: {result.get('total_weeks')} weeks")
+        return result
+
+    except Exception as e:
+        print(f"Learning path error: {type(e).__name__}: {str(e)}")
+        raise Exception(f"Learning path failed: {type(e).__name__}: {str(e)}")
