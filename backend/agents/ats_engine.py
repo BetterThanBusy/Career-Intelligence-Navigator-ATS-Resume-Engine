@@ -11,7 +11,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import structlog
 
 log = structlog.get_logger()
-client = anthropic.Anthropic()
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 ATS_SCHEMA = {
     "ats_score": "integer 0-100",
