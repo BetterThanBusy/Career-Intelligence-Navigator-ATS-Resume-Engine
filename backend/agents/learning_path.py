@@ -8,60 +8,101 @@ def generate_learning_path(gap_analysis: dict, constraints: dict) -> dict:
 
     print("Generating learning path")
 
-    clean_gaps = {k: v for k, v in gap_analysis.items() if not k.startswith("_")}
-
     hours_per_week = constraints.get("hours_per_week", 5)
     budget = constraints.get("budget", "free")
-    learning_style = constraints.get("learning_style", "mixed")
     timeline_months = constraints.get("timeline_months", 3)
-    total_weeks = timeline_months * 4
 
-    budget_instruction = {
-        "free": "ONLY recommend free resources.",
-        "low": "Prefer free, max $50 total.",
-        "any": "Recommend best resources regardless of cost."
-    }.get(budget, "Prefer free resources.")
+    # Send only the critical fields to keep prompt small
+    critical_gaps = gap_analysis.get("critical_gaps", [])[:3]
+    quick_wins = gap_analysis.get("quick_wins", [])[:3]
+    target_role = gap_analysis.get("recommended_pivot", {}).get("target_role", "target role")
 
-    prompt = f"""You are a career education strategist. Create a week-by-week learning roadmap.
+    prompt = f"""Create a {timeline_months}-month learning roadmap for someone targeting {target_role}.
 
-GAP ANALYSIS:
-{json.dumps(clean_gaps, indent=2)}
+Critical gaps to address: {json.dumps(critical_gaps)}
+Quick wins available: {json.dumps(quick_wins)}
+Hours available per week: {hours_per_week}
+Budget: {budget}
 
-CONSTRAINTS:
-- Hours per week: {hours_per_week}
-- Budget: {budget} — {budget_instruction}
-- Learning style: {learning_style}
-- Timeline: {timeline_months} months ({total_weeks} weeks)
-
-Return ONLY valid JSON, no markdown, no explanation:
+Return ONLY this JSON, no markdown, no text before or after:
 {{
     "roadmap": [
         {{
             "week": 1,
-            "focus": "topic for this week",
+            "focus": "topic",
             "resources": [
                 {{
                     "name": "resource name",
-                    "url": "https://actual-url.com",
+                    "url": "https://url.com",
                     "type": "course",
-                    "platform": "Coursera",
+                    "platform": "platform name",
                     "cost": "free",
-                    "time_hours": 5,
-                    "why": "why this resource"
+                    "time_hours": {hours_per_week},
+                    "why": "reason"
                 }}
             ],
-            "milestone": "what they achieve by end of week"
+            "milestone": "what they achieve"
+        }},
+        {{
+            "week": 2,
+            "focus": "topic",
+            "resources": [
+                {{
+                    "name": "resource name",
+                    "url": "https://url.com",
+                    "type": "course",
+                    "platform": "platform name",
+                    "cost": "free",
+                    "time_hours": {hours_per_week},
+                    "why": "reason"
+                }}
+            ],
+            "milestone": "what they achieve"
+        }},
+        {{
+            "week": 3,
+            "focus": "topic",
+            "resources": [
+                {{
+                    "name": "resource name",
+                    "url": "https://url.com",
+                    "type": "course",
+                    "platform": "platform name",
+                    "cost": "free",
+                    "time_hours": {hours_per_week},
+                    "why": "reason"
+                }}
+            ],
+            "milestone": "what they achieve"
+        }},
+        {{
+            "week": 4,
+            "focus": "topic",
+            "resources": [
+                {{
+                    "name": "resource name",
+                    "url": "https://url.com",
+                    "type": "course",
+                    "platform": "platform name",
+                    "cost": "free",
+                    "time_hours": {hours_per_week},
+                    "why": "reason"
+                }}
+            ],
+            "milestone": "what they achieve"
         }}
     ],
-    "total_weeks": {total_weeks},
+    "total_weeks": 4,
     "total_cost_usd": 0,
-    "estimated_outcome": "what roles they qualify for after completion",
-    "key_projects_to_build": ["project1", "project2", "project3"],
+    "estimated_outcome": "what roles they qualify for",
+    "key_projects_to_build": ["project1", "project2"],
     "communities_to_join": ["community1", "community2"],
     "metrics_to_track": ["metric1", "metric2"]
 }}
 
-Generate {min(total_weeks, 8)} weeks of roadmap. Return only JSON."""
+Fill in ALL fields with real specific content for {target_role}.
+{"Only free resources." if budget == "free" else "Mix of free and paid resources."}
+Return only the JSON object. Nothing else."""
 
     try:
         response = client.messages.create(
@@ -69,24 +110,37 @@ Generate {min(total_weeks, 8)} weeks of roadmap. Return only JSON."""
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}]
         )
-        print("Learning path Claude response received")
 
         raw = response.content[0].text.strip()
+        print(f"Learning path raw response length: {len(raw)}")
+        print(f"First 200 chars: {raw[:200]}")
+
+        if not raw:
+            raise Exception("Claude returned empty response")
+
+        # Strip markdown if present
         if "```" in raw:
             parts = raw.split("```")
             for part in parts:
                 part = part.strip()
                 if part.startswith("json"):
                     part = part[4:].strip()
-                try:
-                    return json.loads(part)
-                except:
-                    continue
+                if part.startswith("{"):
+                    try:
+                        result = json.loads(part)
+                        print("Learning path parsed successfully")
+                        return result
+                    except:
+                        continue
 
+        # Direct parse
         result = json.loads(raw)
-        print(f"Learning path generated: {result.get('total_weeks')} weeks")
+        print(f"Learning path complete: {result.get('total_weeks')} weeks")
         return result
 
+    except json.JSONDecodeError as e:
+        print(f"JSON parse error: {str(e)}, raw: {raw[:500] if raw else 'EMPTY'}")
+        raise Exception(f"Learning path failed: JSONDecodeError: {str(e)}")
     except Exception as e:
         print(f"Learning path error: {type(e).__name__}: {str(e)}")
         raise Exception(f"Learning path failed: {type(e).__name__}: {str(e)}")
