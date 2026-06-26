@@ -104,39 +104,48 @@ Fill in ALL fields with real specific content for {target_role}.
 {"Only free resources." if budget == "free" else "Mix of free and paid resources."}
 Return only the JSON object. Nothing else."""
 
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4000,
-            messages=[{"role": "user", "content": prompt}]
-        )
+   try:
+    response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=4000,
+    messages=[
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+)
 
-        raw = response.content[0].text.strip()
-        print(f"Learning path raw response length: {len(raw)}")
-        print(f"First 200 chars: {raw[:200]}")
+print("\n================ CLAUDE RESPONSE ================\n")
+print(response)
+print("\n===============================================\n")
 
-        if not raw:
-            raise Exception("Claude returned empty response")
+print("Stop Reason:", response.stop_reason)
+print("Model:", response.model)
 
-        # Strip markdown if present
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                part = part.strip()
-                if part.startswith("json"):
-                    part = part[4:].strip()
-                if part.startswith("{"):
-                    try:
-                        result = json.loads(part)
-                        print("Learning path parsed successfully")
-                        return result
-                    except:
-                        continue
+print("\n=========== CONTENT BLOCKS ===========\n")
 
-        # Direct parse
-        result = json.loads(raw)
-        print(f"Learning path complete: {result.get('total_weeks')} weeks")
-        return result
+text_parts = []
+
+for i, block in enumerate(response.content):
+    print(f"\n--- Block {i} ---")
+    print("Type:", type(block))
+
+    if hasattr(block, "text"):
+        print(block.text)
+        text_parts.append(block.text)
+
+raw = "\n".join(text_parts).strip()
+
+print("\n=========== RAW TEXT ===========")
+print(raw)
+print("=========== END RAW ===========\n")
+
+print("Raw Length:", len(raw))
+
+result = json.loads(raw)
+
+return result
 
     except json.JSONDecodeError as e:
         print(f"JSON parse error: {str(e)}, raw: {raw[:500] if raw else 'EMPTY'}")
