@@ -12,6 +12,7 @@ def generate_learning_path(gap_analysis: dict, constraints: dict) -> dict:
     budget = constraints.get("budget", "free")
     timeline_months = constraints.get("timeline_months", 3)
 
+    
     # Send only the critical fields to keep prompt small
     critical_gaps = gap_analysis.get("critical_gaps", [])[:3]
     quick_wins = gap_analysis.get("quick_wins", [])[:3]
@@ -24,7 +25,8 @@ Quick wins available: {json.dumps(quick_wins)}
 Hours available per week: {hours_per_week}
 Budget: {budget}
 
-Return ONLY this JSON, no markdown, no text before or after:
+Return ONLY valid JSON.
+
 {{
     "roadmap": [
         {{
@@ -32,124 +34,93 @@ Return ONLY this JSON, no markdown, no text before or after:
             "focus": "topic",
             "resources": [
                 {{
-                    "name": "resource name",
-                    "url": "https://url.com",
+                    "name": "resource",
+                    "url": "https://example.com",
                     "type": "course",
-                    "platform": "platform name",
+                    "platform": "Coursera",
                     "cost": "free",
                     "time_hours": {hours_per_week},
                     "why": "reason"
                 }}
             ],
-            "milestone": "what they achieve"
-        }},
-        {{
-            "week": 2,
-            "focus": "topic",
-            "resources": [
-                {{
-                    "name": "resource name",
-                    "url": "https://url.com",
-                    "type": "course",
-                    "platform": "platform name",
-                    "cost": "free",
-                    "time_hours": {hours_per_week},
-                    "why": "reason"
-                }}
-            ],
-            "milestone": "what they achieve"
-        }},
-        {{
-            "week": 3,
-            "focus": "topic",
-            "resources": [
-                {{
-                    "name": "resource name",
-                    "url": "https://url.com",
-                    "type": "course",
-                    "platform": "platform name",
-                    "cost": "free",
-                    "time_hours": {hours_per_week},
-                    "why": "reason"
-                }}
-            ],
-            "milestone": "what they achieve"
-        }},
-        {{
-            "week": 4,
-            "focus": "topic",
-            "resources": [
-                {{
-                    "name": "resource name",
-                    "url": "https://url.com",
-                    "type": "course",
-                    "platform": "platform name",
-                    "cost": "free",
-                    "time_hours": {hours_per_week},
-                    "why": "reason"
-                }}
-            ],
-            "milestone": "what they achieve"
+            "milestone": "achievement"
         }}
     ],
     "total_weeks": 4,
     "total_cost_usd": 0,
-    "estimated_outcome": "what roles they qualify for",
-    "key_projects_to_build": ["project1", "project2"],
-    "communities_to_join": ["community1", "community2"],
-    "metrics_to_track": ["metric1", "metric2"]
+    "estimated_outcome": "target outcome",
+    "key_projects_to_build": [],
+    "communities_to_join": [],
+    "metrics_to_track": []
 }}
 
-Fill in ALL fields with real specific content for {target_role}.
-{"Only free resources." if budget == "free" else "Mix of free and paid resources."}
-Return only the JSON object. Nothing else."""
+{"Only free resources." if budget == "free" else "Mix free and paid resources."}
 
-   try:
-    response = client.messages.create(
-    model="claude-sonnet-4-6",
-    max_tokens=4000,
-    messages=[
-        {
-            "role": "user",
-            "content": prompt
-        }
-    ]
-)
+Return ONLY the JSON object.
+"""
 
-print("\n================ CLAUDE RESPONSE ================\n")
-print(response)
-print("\n===============================================\n")
+    try:
 
-print("Stop Reason:", response.stop_reason)
-print("Model:", response.model)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
 
-print("\n=========== CONTENT BLOCKS ===========\n")
+        print("\n================ CLAUDE RESPONSE ================\n")
+        print(response)
+        print("\n===============================================\n")
 
-text_parts = []
+        print("Stop Reason:", response.stop_reason)
+        print("Model:", response.model)
 
-for i, block in enumerate(response.content):
-    print(f"\n--- Block {i} ---")
-    print("Type:", type(block))
+        print("\n=========== CONTENT BLOCKS ===========\n")
 
-    if hasattr(block, "text"):
-        print(block.text)
-        text_parts.append(block.text)
+        text_parts = []
 
-raw = "\n".join(text_parts).strip()
+        for i, block in enumerate(response.content):
 
-print("\n=========== RAW TEXT ===========")
-print(raw)
-print("=========== END RAW ===========\n")
+            print(f"\n--- Block {i} ---")
+            print("Type:", type(block))
 
-print("Raw Length:", len(raw))
+            if getattr(block, "type", "") == "text":
+                print(block.text)
+                text_parts.append(block.text)
 
-result = json.loads(raw)
+            else:
+                print(block)
 
-return result
+        raw = "\n".join(text_parts).strip()
+
+        print("\n=========== RAW TEXT ===========")
+        print(raw)
+        print("=========== END RAW ===========\n")
+
+        print("Raw Length:", len(raw))
+
+        if not raw:
+            raise Exception("Claude returned an empty response.")
+
+        result = json.loads(raw)
+
+        print("Learning path parsed successfully")
+
+        return result
 
     except json.JSONDecodeError as e:
-        print(f"JSON parse error: {str(e)}, raw: {raw[:500] if raw else 'EMPTY'}")
-        raise Exception(f"Learning path failed: JSONDecodeError: {str(e)}")
+
+        print("JSON Decode Error")
+        print(raw)
+
+        raise Exception(f"Learning path failed: JSONDecodeError: {e}")
+
     except Exception as e:
-        print(f"Learning path error: {type(e).__name__}: {str(e)}")
-        raise Exception(f"Learning path failed: {type(e).__name__}: {str(e)}")
+
+        print("Learning path error:", type(e).__name__, str(e))
+
+        raise Exception(f"Learning path failed: {type(e).__name__}: {e}")
