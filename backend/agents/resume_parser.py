@@ -1,79 +1,57 @@
-"""
-Resume Parser Agent
-Extracts structured profile data from raw resume text.
-
-Cost: ~$0.05 per parse (Claude Sonnet 4.6)
-"""
-
 import json
+import os
 import anthropic
-from tenacity import retry, stop_after_attempt, wait_exponential
-import structlog
 
-log = structlog.get_logger()
-client = anthropic.Anthropic()
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-RESUME_SCHEMA = {
-    "current_role": "most recent job title as a string",
-    "years_experience": "total years of professional experience as integer",
-    "skills": ["list of all technical and soft skills mentioned"],
-    "industries": ["list of industries the person has worked in"],
-    "education": ["list of degrees and certifications"],
-    "companies": ["list of companies worked at"],
-    "notable_achievements": ["list of quantified accomplishments if any"],
-    "inferred_strengths": ["3-5 key strengths inferred from the resume"],
-    "potential_gaps": ["areas that seem underdeveloped based on the experience level"]
-}
-
-
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def parse_resume(resume_text: str) -> dict:
-    """
-    Parse a resume into structured profile data.
-    
-    Args:
-        resume_text: Plain text of the resume
-        
-    Returns:
-        Structured profile dict
-    """
-    
-    log.info("Parsing resume", resume_length=len(resume_text))
-    
+
+    print("Parsing resume")
+
     prompt = f"""Extract structured data from this resume. Be thorough and accurate.
 
 RESUME:
 {resume_text}
 
-Return ONLY valid JSON matching this exact schema:
-{json.dumps(RESUME_SCHEMA, indent=2)}
+Return ONLY valid JSON, no markdown, no explanation:
+{{
+    "current_role": "most recent job title",
+    "years_experience": 9,
+    "skills": ["skill1", "skill2", "skill3"],
+    "industries": ["industry1", "industry2"],
+    "education": ["degree1", "degree2"],
+    "companies": ["company1", "company2"],
+    "notable_achievements": ["achievement1", "achievement2"],
+    "inferred_strengths": ["strength1", "strength2", "strength3"],
+    "potential_gaps": ["gap1", "gap2"]
+}}
 
-Rules:
-- skills: include ALL mentioned skills, tools, technologies, and methodologies
-- years_experience: calculate total, not just most recent role
-- potential_gaps: infer based on role level (e.g. senior manager with no strategy mentions is a gap)
-- Be factual — only include what's actually in the resume
+Return only JSON."""
 
-Return only the JSON. No markdown. No explanation."""
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        print("Resume parser Claude response received")
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    
-    result = json.loads(raw.strip())
-    result["_meta"] = {
-        "tokens_in": response.usage.input_tokens,
-        "tokens_out": response.usage.output_tokens,
-        "model": "claude-sonnet-4-6"
-    }
-    
-    log.info("Resume parsed", role=result.get("current_role"), skills_count=len(result.get("skills", [])))
-    return result
+        raw = response.content[0].text.strip()
+        if "```" in raw:
+            parts = raw.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                try:
+                    return json.loads(part)
+                except:
+                    continue
+
+        result = json.loads(raw)
+        print(f"Resume parsed: {result.get('current_role')}")
+        return result
+
+    except Exception as e:
+        print(f"Resume parser error: {type(e).__name__}: {str(e)}")
+        raise Exception(f"Resume parser failed: {type(e).__name__}: {str(e)}")
